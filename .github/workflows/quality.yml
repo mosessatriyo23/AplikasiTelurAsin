@@ -1,0 +1,32 @@
+name: quality
+on: [push, pull_request]
+jobs:
+  isolated-checks:
+    runs-on: ubuntu-latest
+    env:
+      DATABASE_URL: file:./ci-unused.db
+      ADMIN_SESSION_SECRET: ci-placeholder-at-least-thirty-two-characters
+      APP_URL: https://example.test
+      NEXT_PUBLIC_APP_URL: https://example.test
+      MIDTRANS_IS_PRODUCTION: 'false'
+      MIDTRANS_SERVER_KEY: ci-not-a-real-key
+      NEXT_PUBLIC_MIDTRANS_CLIENT_KEY: ci-not-a-real-key
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npx prisma generate
+      - run: npx prisma validate
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npm test
+      - run: npm run test:integration
+      - run: npm run test:coverage
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:e2e
+      - run: npm run build
+      - run: npm audit
+      - run: npx tsx scripts/validate-environment.ts

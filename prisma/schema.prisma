@@ -1,0 +1,212 @@
+model RateLimit {
+  key          String   @id
+  count        Int
+  failures     Int      @default(0)
+  expiresAt    DateTime
+  blockedUntil DateTime?
+  @@index([expiresAt])
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+enum DeliveryMethod {
+  PICKUP
+  DELIVERY
+  GOSEND
+}
+
+enum PaymentMethod {
+  COD
+  MIDTRANS
+}
+
+enum PaymentStatus {
+  PENDING
+  PAID
+  FAILED
+  CANCELLED
+}
+
+enum FulfillmentState {
+  RESERVED
+  READY
+  COMPLETED
+  CANCELLED
+  REFUNDED
+  REVIEW
+}
+
+enum CheckoutState {
+  NONE
+  CREATING
+  ACTIVE
+  AMBIGUOUS
+  DEFINITIVE_FAILURE
+  TERMINAL_CONFIRMED
+  RESOLVED
+}
+
+model PaymentAudit {
+  id          String   @id @default(cuid())
+  orderId     String
+  source      String
+  outcome     String
+  // Controlled status/error codes only; never gateway payloads, tokens, keys or customer data.
+  detail      String?
+  createdAt   DateTime @default(now())
+  order       Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@index([orderId, createdAt])
+}
+
+model Product {
+  id          String      @id @default(cuid())
+  slug        String      @unique
+  name        String
+  price       Int
+  stock       Int         @default(0)
+  availableAt DateTime?
+  active      Boolean     @default(true)
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+  items       OrderItem[]
+  // Legacy stock must be explicitly reconciled before using ready-stock semantics.
+  readyStockReconciled Boolean @default(false)
+  batches     StockBatch[]
+}
+
+model StoreSettings {
+  id        Int      @id @default(1)
+  address   String
+  landmark  String?
+  latitude  Float
+  longitude Float
+  updatedAt DateTime @updatedAt
+}
+
+model StockBatch {
+  id         String   @id @default(cuid())
+  productId  String
+  quantity   Int
+  readyAt    DateTime
+  releasedAt DateTime?
+  createdAt  DateTime @default(now())
+  product    Product  @relation(fields: [productId], references: [id])
+
+  @@index([releasedAt, readyAt])
+  @@index([productId, releasedAt])
+}
+
+model Admin {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  username     String?  @unique
+  passwordHash String
+  createdAt    DateTime @default(now())
+}
+
+model Order {
+  id               String          @id @default(cuid())
+  token            String          @unique
+  orderNumber      String          @unique
+  customerName     String
+  phone            String
+  requestedDate    String
+  deliveryMethod   DeliveryMethod
+  address          String?
+  latitude         Float?
+  longitude        Float?
+  landmark         String?
+  subtotal         Int
+  tip              Int             @default(0)
+  total            Int
+  refundedAmount   Int             @default(0)
+  paymentMethod    PaymentMethod
+  paymentStatus    PaymentStatus   @default(PENDING)
+  fulfillmentState FulfillmentState @default(RESERVED)
+  reservationExpiresAt DateTime?
+  cancellationReason String?
+  stockRestoredAt DateTime?
+  midtransTransactionId String?         @unique
+  snapToken        String?
+  snapRedirectUrl  String?
+  checkoutStartedAt DateTime?
+  checkoutState CheckoutState @default(NONE)
+  checkoutReviewedAt DateTime?
+  checkoutReviewAlertedAt DateTime?
+  checkoutTerminalCheckedAt DateTime?
+  checkoutTerminalStatus String?
+  paymentCheckedAt  DateTime?
+  stockRestored    Boolean         @default(false)
+  waitlisted       Boolean         @default(false)
+  dateTentative    Boolean         @default(false)
+  completed        Boolean         @default(false)
+  completedAt      DateTime?
+  readyNotifiedAt  DateTime?
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
+  items            OrderItem[]
+  notifications    Notification[]
+  paymentAudits    PaymentAudit[]
+  pushSubscriptions PushSubscription[]
+
+  @@index([createdAt])
+  @@index([completed, paymentStatus])
+  @@index([paymentStatus, reservationExpiresAt])
+  @@index([paymentMethod, paymentCheckedAt])
+  @@index([checkoutState, checkoutReviewAlertedAt])
+}
+
+model OrderItem {
+  id        String  @id @default(cuid())
+  orderId   String
+  productId String
+  name      String
+  price     Int
+  quantity  Int
+  lineTotal Int
+  readyAt   DateTime?
+  order     Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  product   Product @relation(fields: [productId], references: [id])
+  @@index([orderId])
+  @@index([productId])
+}
+
+model PushSubscription {
+  id        String   @id @default(cuid())
+  orderId   String
+  endpoint  String
+  p256dh    String
+  auth      String
+  // Accepted by the push service, not proof that a device displayed it.
+  readyPushSentAt DateTime?
+  sendingAt DateTime?
+  pushAttempts Int @default(0)
+  lastPushError String?
+  lastTestAt DateTime?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  order     Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@unique([orderId, endpoint])
+  @@index([orderId])
+}
+
+model Notification {
+  id        String   @id @default(cuid())
+  orderId   String
+  type      String
+  message   String
+  read      Boolean  @default(false)
+  createdAt DateTime @default(now())
+  order     Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@index([read, createdAt])
+}
